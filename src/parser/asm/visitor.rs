@@ -1,3 +1,4 @@
+use crate::parser::asm::gen::*;
 use koopa::back::{self, NameManager};
 use koopa::ir::entities::{FunctionData, ValueData};
 use koopa::ir::layout::BasicBlockNode;
@@ -9,20 +10,17 @@ use std::io::{Result, Write};
 #[derive(Default)]
 pub struct Visitor;
 
-impl<W: Write> back::Visitor<W> for Visitor {
-    type Output = ();
-
-    fn visit(
+impl Visitor {
+    pub fn visit<W: Write>(
         &mut self,
         w: &mut W,
-        nm: &mut back::NameManager,
         program: &koopa::ir::Program,
-    ) -> std::io::Result<Self::Output> {
+    ) -> std::io::Result<()> {
         let mut visitor = VisitorImpl {
             w,
-            nm,
             program,
             func: None,
+            vm: ValueManager::new(),
         };
         visitor.visit()
     }
@@ -31,9 +29,9 @@ impl<W: Write> back::Visitor<W> for Visitor {
 /// The implementation of riscv Koopa IR generator.
 struct VisitorImpl<'a, W: Write> {
     w: &'a mut W,
-    nm: &'a mut NameManager,
     program: &'a Program,
     func: Option<&'a FunctionData>,
+    vm: ValueManager,
 }
 
 impl<W: Write> VisitorImpl<'_, W> {
@@ -63,16 +61,18 @@ impl<W: Write> VisitorImpl<'_, W> {
     /// Generates the given basic block.
     fn visit_bb(&mut self, bb: BasicBlock, node: &BasicBlockNode) -> Result<()> {
         for inst in node.insts().keys() {
-            let value_data = self.func.unwrap().dfg().value(*inst);
-            self.visit_local_inst(value_data)?;
+            self.visit_local_inst(inst)?;
         }
         Ok(())
     }
 
     /// Generates the given local instruction.
-    fn visit_local_inst(&mut self, inst: &ValueData) -> Result<()> {
-
-        match inst.kind() {
+    fn visit_local_inst(&mut self, inst: &Value) -> Result<()> {
+        let value_data = self.func.unwrap().dfg().value(*inst);
+        match value_data.kind() {
+            ValueKind::Binary(b) => {
+                self.visit_binary(inst, b)?;
+            }
             ValueKind::Return(v) => self.visit_return(v)?,
             _ => unimplemented!(),
         };
@@ -83,22 +83,110 @@ impl<W: Write> VisitorImpl<'_, W> {
     fn visit_return(&mut self, ret: &Return) -> Result<()> {
         if let Some(val) = ret.value() {
             self.visit_value(val)?;
+            let val = self
+                .vm
+                .get_value(val)
+                .expect(&format!("value {:#?} not found", val));
 
+            match *val {
+                ValueStore::Const(v) => {
+                    if let Some(inst) = self.vm.reset_reg(15) {
+                        writeln!(self.w, "  {}", inst)?;
+                    }
+                    writeln!(self.w, "  li {}, {}", self.vm.get_reg_name(15), v)?;
+                }
+                ValueStore::Reg(r) => {
+                    if r != 15 {
+                        if let Some(inst) = self.vm.reset_reg(15) {
+                            writeln!(self.w, "  {}", inst)?;
+                        }
+                        write!(
+                            self.w,
+                            "  mv {}, {}",
+                            self.vm.get_reg_name(15),
+                            self.vm.get_reg_name(r)
+                        )?;
+                    }
+                }
+            }
         }
         writeln!(self.w, "  ret")?;
         Ok(())
     }
 
-    /// Generates the given value.
-    fn visit_value(&mut self, value: Value) -> Result<()> {
-        let value = self.func.unwrap().dfg().value(value);
-        match value.kind() {
-            ValueKind::Integer(v) => {
-                writeln!(self.w, "  li a0, {}", v.value())?;
+    /// Generates the given binary operation._
+    fn visit_binary(&mut self, value: &Value, b: &Binary) -> Result<()> {
+        self.visit_value(b.lhs())?;
+        self.visit_value(b.rhs())?;
+
+        let (lvs, rvs) = (
+            *self.vm.get_value(b.lhs()).unwrap(),
+            *self.vm.get_value(b.rhs()).unwrap(),
+        );
+        // let (lvs, rvs) = (self.vm.get_store_name(lvs), self.vm.get_store_name(rvs));
+        // deal const val
+        if let (ValueStore::Const(lv), ValueStore::Const(rv)) = (lvs, rvs) {
+            dbg!("const: ", lv, rv);
+            let bv = ValueStore::Const(match b.op() {
+                BinaryOp::Add => lv + rv,
+                BinaryOp::Sub => lv - rv,
+                BinaryOp::Eq => {
+                    if lv == rv {
+                        1
+                    } else {
+                        0
+                    }
+                }
+                _ => unimplemented!("not implemented"),
+            });
+            self.vm.set_value(*value, bv);
+            return Ok(());
+        }
+
+        // deal reg, for now load all const to reg
+        let rd = self.vm.alloc_reg();
+        let rd_name = self.vm.get_reg_name(rd);
+
+        if let Some(inst) = self.vm.load_reg(b.lhs()) {
+            writeln!(self.w, "  {}", inst)?;
+        }
+        if let Some(inst) = self.vm.load_reg(b.rhs()) {
+            writeln!(self.w, "  {}", inst)?;
+        }
+        let (lvs, rvs) = (
+            *self.vm.get_value(b.lhs()).unwrap(),
+            *self.vm.get_value(b.rhs()).unwrap(),
+        );
+        let (lvs, rvs) = (self.vm.get_store_name(lvs), self.vm.get_store_name(rvs));
+
+        match b.op() {
+            BinaryOp::Sub => {
+                writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
             }
-            _ => unimplemented!()
-        };
+            BinaryOp::Eq => {
+                writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
+                writeln!(self.w, "  seqz {}, {}", rd_name, rd_name)?;
+            }
+            _ => unimplemented!("not implemented"),
+        }
+
+        self.vm.set_value(*value, ValueStore::Reg(rd));
         Ok(())
     }
 
+    /// check
+    fn visit_value(&mut self, v: Value) -> Result<()> {
+        let data = self.func.unwrap().dfg().value(v);
+        match data.kind() {
+            ValueKind::Integer(i) => {
+                self.vm.set_value(v, ValueStore::Const(i.value()));
+            }
+            ValueKind::Binary(_) => {
+                // do nothing
+            }
+            _ => unimplemented!("not implemented"),
+        }
+
+        Ok(())
+    }
 }

@@ -1,4 +1,6 @@
 fun @main(): i32 {
-%0:
+%main_0:
+
+%ret_1:
   ret 0
 }

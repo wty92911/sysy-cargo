@@ -27,20 +27,20 @@ pub enum Exp {
 }
 
 #[derive(Debug)]
-pub enum UnaryExp{
+pub enum UnaryExp {
     PrimaryExp(PrimaryExp),
-    UnaryOp(UnaryOp, Box<UnaryExp>)
+    UnaryOp(UnaryOp, Box<UnaryExp>),
 }
 
 #[derive(Debug)]
-pub enum UnaryOp{
+pub enum UnaryOp {
     Plus,
     Minus,
     Not,
 }
 
 #[derive(Debug)]
-pub enum PrimaryExp{
+pub enum PrimaryExp {
     Exp(Box<Exp>), // bracket
     Number(Number),
 }

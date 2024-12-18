@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     let ast = sysy::CompUnitParser::new().parse(&dbg!(input)).unwrap();
     let program = ast.into();
     let mut file = File::create(output)?;
-    let text ;
+    let text;
     match mode.as_str() {
         "-koopa" => {
             // convert to text form
@@ -27,16 +27,16 @@ fn main() -> Result<()> {
             gen.generate_on(&program)?;
             text = std::str::from_utf8(&gen.writer()).unwrap().to_string();
             // println!("{}", text_form_ir);
-            
         }
         "-riscv" => {
             let mut asm_visitor = Visitor::default();
-            let mut name_manager = NameManager::default();
             let mut riscv_code = Vec::new();
-            asm_visitor.visit(&mut riscv_code, &mut name_manager, &program)?;
+            asm_visitor.visit(&mut riscv_code, &program)?;
             text = String::from_utf8(riscv_code).unwrap();
         }
-        _ => {panic!("Not implement")}
+        _ => {
+            panic!("Not implement")
+        }
     }
     write!(file, "{}", text)?;
 
