@@ -18,7 +18,31 @@ pub struct Block {
 }
 #[derive(Debug)]
 pub struct Stmt {
-    pub number: Number,
+    pub exp: Exp,
+}
+
+#[derive(Debug)]
+pub enum Exp {
+    UnaryExp(UnaryExp),
+}
+
+#[derive(Debug)]
+pub enum UnaryExp{
+    PrimaryExp(PrimaryExp),
+    UnaryOp(UnaryOp, Box<UnaryExp>)
+}
+
+#[derive(Debug)]
+pub enum UnaryOp{
+    Plus,
+    Minus,
+    Not,
+}
+
+#[derive(Debug)]
+pub enum PrimaryExp{
+    Exp(Box<Exp>), // bracket
+    Number(Number),
 }
 
 pub type Number = i32;

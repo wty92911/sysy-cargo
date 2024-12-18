@@ -1,4 +1,4 @@
-use compiler::parser::asm::visitor::{*, Visitor};
+use compiler::parser::asm::visitor::Visitor;
 use koopa::back::{KoopaGenerator, NameManager, Visitor as BackVisitor};
 use lalrpop_util::lalrpop_mod;
 use std::env::args;
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     let ast = sysy::CompUnitParser::new().parse(&dbg!(input)).unwrap();
     let program = ast.into();
     let mut file = File::create(output)?;
-    let mut text = "Not implemented".to_string();
+    let text ;
     match mode.as_str() {
         "-koopa" => {
             // convert to text form

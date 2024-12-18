@@ -1,2 +1,3 @@
-int main() { return 0; }
-/*This is a comment*/
+int main() {
+  return +(- -!6);  // 看起来像个颜文字
+}

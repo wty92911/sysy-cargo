@@ -1,4 +1,15 @@
-  .text
-  .global main
-@main:
-  li a0, 0  ret
+fun @main(): i32 {
+%main_0:
+
+%exp_1:
+  %0 = eq 0, 6
+
+%exp_2:
+  %1 = sub 0, %0
+
+%exp_3:
+  %2 = sub 0, %1
+
+%ret_4:
+  ret %2
+}
