@@ -94,7 +94,7 @@ impl Exp {
     /// build exp
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
         match self {
-            Exp::UnaryExp(exp) => exp.build(program, params),
+            Exp::AddExp(exp) => exp.build(program, params),
         }
     }
 }
@@ -116,17 +116,6 @@ impl UnaryExp {
 
                 // create a new basic block for exp
                 let func_data = program.func_mut(params.func);
-                let old_bb = params.bb;
-                params.bb = func_data
-                    .dfg_mut()
-                    .new_bb()
-                    .basic_block(next_bb_id!("%exp"));
-                func_data
-                    .layout_mut()
-                    .bbs_mut()
-                    .push_key_back(params.bb)
-                    .unwrap();
-
                 let zero = func_data.dfg_mut().new_value().integer(0);
                 let op = func_data
                     .dfg_mut()
@@ -138,9 +127,6 @@ impl UnaryExp {
                     .bb_mut(params.bb)
                     .insts_mut()
                     .extend([op]);
-
-                // recover bb
-                params.bb = old_bb;
             }
         }
     }
@@ -156,6 +142,72 @@ impl PrimaryExp {
                 params.v = Some(value);
                 // just a number, don't need to create a instruction
                 // func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([value]);
+            }
+        }
+    }
+}
+
+impl AddExp {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            AddExp::MulExp(exp) => exp.build(program, params),
+            AddExp::AddExp(add_exp, op, mul_exp) => {
+                add_exp.build(program, params);
+                let add_v = params.v.unwrap();
+
+                mul_exp.build(program, params);
+                let mul_v = params.v.unwrap();
+
+                let op = match op {
+                    AddOp::Add => BinaryOp::Add,
+                    AddOp::Sub => BinaryOp::Sub,
+                };
+
+                let func_data = program.func_mut(params.func);
+                let op = func_data
+                    .dfg_mut()
+                    .new_value()
+                    .binary(op, add_v, mul_v);
+                params.v = Some(op);
+                func_data
+                    .layout_mut()
+                    .bb_mut(params.bb)
+                    .insts_mut()
+                    .extend([op]);
+                
+            }
+        }
+    }
+}
+
+impl MulExp {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            MulExp::UnaryExp(exp) => exp.build(program, params),
+            MulExp::MulExp(mul_exp, op, unary_exp) => {
+                mul_exp.build(program, params);
+                let mul_v = params.v.unwrap();
+
+                unary_exp.build(program, params);
+                let unary_v = params.v.unwrap();
+
+                let op = match op {
+                    MulOp::Mul => BinaryOp::Mul,
+                    MulOp::Div => BinaryOp::Div,
+                    MulOp::Mod => BinaryOp::Mod,
+                };
+                
+                let func_data = program.func_mut(params.func);
+                let op = func_data
+                    .dfg_mut()
+                    .new_value()
+                    .binary(op, mul_v, unary_v);
+                params.v = Some(op);
+                func_data
+                    .layout_mut()
+                    .bb_mut(params.bb)
+                    .insts_mut()
+                    .extend([op]);
             }
         }
     }

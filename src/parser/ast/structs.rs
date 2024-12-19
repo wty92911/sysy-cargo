@@ -1,3 +1,5 @@
+use std::ops::Add;
+
 #[derive(Debug)]
 pub struct CompUnit {
     pub func_def: FuncDef,
@@ -23,7 +25,7 @@ pub struct Stmt {
 
 #[derive(Debug)]
 pub enum Exp {
-    UnaryExp(UnaryExp),
+    AddExp(AddExp),
 }
 
 #[derive(Debug)]
@@ -43,6 +45,32 @@ pub enum UnaryOp {
 pub enum PrimaryExp {
     Exp(Box<Exp>), // bracket
     Number(Number),
+}
+
+
+#[derive(Debug)]
+pub enum MulExp {
+    UnaryExp(UnaryExp),
+    MulExp(Box<MulExp>, MulOp, UnaryExp),
+}
+
+#[derive(Debug)]
+pub enum MulOp {
+    Mul,
+    Div,
+    Mod,
+}
+
+#[derive(Debug)]
+pub enum AddExp {
+    MulExp(MulExp),
+    AddExp(Box<AddExp>, AddOp, MulExp),
+}
+
+#[derive(Debug)]
+pub enum AddOp {
+    Add,
+    Sub,
 }
 
 pub type Number = i32;

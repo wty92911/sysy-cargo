@@ -174,7 +174,7 @@ impl<W: Write> VisitorImpl<'_, W> {
         Ok(())
     }
 
-    /// check
+    /// check if const, add it to vm
     fn visit_value(&mut self, v: Value) -> Result<()> {
         let data = self.func.unwrap().dfg().value(v);
         match data.kind() {
