@@ -137,6 +137,9 @@ impl<W: Write> VisitorImpl<'_, W> {
                         0
                     }
                 }
+                BinaryOp::Mul => lv * rv,
+                BinaryOp::Div => lv / rv,
+                BinaryOp::Mod => lv % rv,
                 _ => unimplemented!("not implemented"),
             });
             self.vm.set_value(*value, bv);
@@ -160,12 +163,24 @@ impl<W: Write> VisitorImpl<'_, W> {
         let (lvs, rvs) = (self.vm.get_store_name(lvs), self.vm.get_store_name(rvs));
 
         match b.op() {
+            BinaryOp::Add => {
+                writeln!(self.w, "  add {}, {}, {}", rd_name, lvs, rvs)?;
+            }
             BinaryOp::Sub => {
                 writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
             }
             BinaryOp::Eq => {
                 writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
                 writeln!(self.w, "  seqz {}, {}", rd_name, rd_name)?;
+            }
+            BinaryOp::Mul => {
+                writeln!(self.w, "  mul {}, {}, {}", rd_name, lvs, rvs)?;
+            }
+            BinaryOp::Div => {
+                writeln!(self.w, "  div {}, {}, {}", rd_name, lvs, rvs)?;
+            }
+            BinaryOp::Mod => {
+                writeln!(self.w, "  rem {}, {}, {}", rd_name, lvs, rvs)?;
             }
             _ => unimplemented!("not implemented"),
         }
