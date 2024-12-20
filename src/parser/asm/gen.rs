@@ -1,5 +1,5 @@
 use koopa::ir::Value;
-use std::{collections::HashMap, fmt::Write};
+use std::collections::HashMap;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ValueStore {

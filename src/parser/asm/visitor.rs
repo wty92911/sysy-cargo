@@ -1,9 +1,8 @@
 use crate::parser::asm::gen::*;
-use koopa::back::{self, NameManager};
-use koopa::ir::entities::{FunctionData, ValueData};
+use koopa::ir::entities::FunctionData;
 use koopa::ir::layout::BasicBlockNode;
 use koopa::ir::values::*;
-use koopa::ir::{BasicBlock, Program, Type, TypeKind, Value, ValueKind};
+use koopa::ir::{BasicBlock, Program, Value, ValueKind};
 use std::io::{Result, Write};
 
 /// Visitor for generating the in-memory form Koopa IR program into the riscv

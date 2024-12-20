@@ -1,5 +1,5 @@
 use compiler::parser::asm::visitor::Visitor;
-use koopa::back::{KoopaGenerator, NameManager, Visitor as BackVisitor};
+use koopa::back::KoopaGenerator;
 use lalrpop_util::lalrpop_mod;
 use std::env::args;
 use std::fs::{read_to_string, File};
