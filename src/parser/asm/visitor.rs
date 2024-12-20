@@ -127,15 +127,16 @@ impl<W: Write> VisitorImpl<'_, W> {
         if let (ValueStore::Const(lv), ValueStore::Const(rv)) = (lvs, rvs) {
             dbg!("const: ", lv, rv);
             let bv = ValueStore::Const(match b.op() {
+                BinaryOp::Eq => (lv == rv) as i32,
+                BinaryOp::NotEq => (lv != rv) as i32,
+                BinaryOp::Lt => (lv < rv) as i32,
+                BinaryOp::Gt => (lv > rv) as i32,
+                BinaryOp::Le => (lv <= rv) as i32,
+                BinaryOp::Ge => (lv >= rv) as i32,
+                BinaryOp::And => lv & rv,
+                BinaryOp::Or => lv | rv,
                 BinaryOp::Add => lv + rv,
                 BinaryOp::Sub => lv - rv,
-                BinaryOp::Eq => {
-                    if lv == rv {
-                        1
-                    } else {
-                        0
-                    }
-                }
                 BinaryOp::Mul => lv * rv,
                 BinaryOp::Div => lv / rv,
                 BinaryOp::Mod => lv % rv,
@@ -162,15 +163,36 @@ impl<W: Write> VisitorImpl<'_, W> {
         let (lvs, rvs) = (self.vm.get_store_name(lvs), self.vm.get_store_name(rvs));
 
         match b.op() {
+            BinaryOp::Eq => {
+                writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
+                writeln!(self.w, "  seqz {}, {}", rd_name, rd_name)?;
+            }
+            BinaryOp::NotEq => {
+                writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
+                writeln!(self.w, "  snez {}, {}", rd_name, rd_name)?;
+            }
+            BinaryOp::Lt => {
+                writeln!(self.w, "  slt {}, {}, {}", rd_name, lvs, rvs)?;
+            }
+            BinaryOp::Gt => {
+                writeln!(self.w, "  slt {}, {}, {}", rd_name, rvs, lvs)?;
+            }
+            BinaryOp::Le => {
+                writeln!(self.w, "  slt {}, {}, {}", rd_name, rvs, lvs)?;
+                writeln!(self.w, "  seqz {}, {}", rd_name, rd_name)?;
+            }
+            BinaryOp::Ge => {
+                writeln!(self.w, "  slt {}, {}, {}", rd_name, lvs, rvs)?;
+                writeln!(self.w, "  seqz {}, {}", rd_name, rd_name)?;
+            }
+            BinaryOp::Or => {
+                writeln!(self.w, "  or {}, {}, {}", rd_name, lvs, rvs)?;
+            }
             BinaryOp::Add => {
                 writeln!(self.w, "  add {}, {}, {}", rd_name, lvs, rvs)?;
             }
             BinaryOp::Sub => {
                 writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
-            }
-            BinaryOp::Eq => {
-                writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
-                writeln!(self.w, "  seqz {}, {}", rd_name, rd_name)?;
             }
             BinaryOp::Mul => {
                 writeln!(self.w, "  mul {}, {}, {}", rd_name, lvs, rvs)?;
