@@ -1,3 +1,4 @@
 int main() {
-  return 0 + 1 || 1 + 2;
+  const int a = 1 + 99999 * 1 * 0000 + 12323;
+  return a;
 }

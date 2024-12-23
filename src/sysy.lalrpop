@@ -17,8 +17,33 @@ use compiler::parser::ast::structs::*;
 // parser 在解析完成后的行为是返回 FuncDef 的值
 pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit{ <> };
 
-// 同上, 不解释
-FuncDef: FuncDef = {
+pub Decl: Decl = {
+	<c: ConstDecl> => Decl::Const(c),
+	// <v: VarDecl> => Decl::VarDecl(v),
+}
+
+pub ConstDecl: ConstDecl = {
+	"const" "int" <def: ConstDef> <defs: ("," <ConstDef>)*> ";" => {
+		let mut c = ConstDecl{ defs: vec![def] };
+		c.defs.extend(defs);
+		c
+	}
+}
+
+
+pub ConstDef: ConstDef = {
+	<ident: Ident> "=" <value: ConstInitVal> => ConstDef{ ident, value }
+}
+
+pub ConstInitVal: ConstInitVal = {
+	<const_exp: ConstExp> => <>
+}
+
+pub ConstExp: ConstExp = {
+	<exp: Exp> => <>
+}
+
+pub FuncDef: FuncDef = {
 	<func_type: FuncType> <ident: Ident> "(" ")" <block: Block> => {
 	    FuncDef{ <> }
     }
@@ -26,16 +51,28 @@ FuncDef: FuncDef = {
 
 FuncType: FuncType = "int" => FuncType::Int;
 
-Block: Block = "{" <stmt: Stmt> "}" => Block{ <> };
+Block: Block = "{" <items: (<BlockItem>)*> "}" => Block{ items };
 
-Stmt: Stmt = "return" <exp: Exp> ";" => Stmt{ <> };
+BlockItem: BlockItem = {
+	<decl: Decl> => BlockItem::Decl(decl),
+	<stmt: Stmt> => BlockItem::Stmt(stmt),
+}
+
+Stmt: Stmt = "return" <exp: Exp> ";" => Stmt::Ret(exp);
+
+
 
 Exp: Exp = <lor_exp: LOrExp> => Exp::Exp(lor_exp);
 
 PrimaryExp: PrimaryExp = {
 	"(" <exp: Exp> ")" => PrimaryExp::Exp(Box::new(exp)),
+	<lval: LVal> => PrimaryExp::LVal(lval),
     <number: Number> => PrimaryExp::Number(number),
 };
+
+LVal: LVal = {
+	<ident: Ident> => ident.into(),
+}
 
 UnaryExp: UnaryExp = {
     <primary: PrimaryExp> => UnaryExp::PrimaryExp(primary),
@@ -107,7 +144,7 @@ LOrExp: LOrExp = {
 // 如果匹配到标识符, 就返回这个字符串
 // 一对尖括号在此处指代的是正则表达式匹配到的字符串 (&str)
 // 关于尖括号到底代表什么, 请 RTFM
-Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
+Ident: Ident = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
 
 // 对整数字面量的处理方式: 把匹配到的字符串按对应进制转换成数字
 IntConst: i32 = {

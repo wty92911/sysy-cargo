@@ -2,10 +2,50 @@
 pub struct CompUnit {
     pub func_def: FuncDef,
 }
+
+#[derive(Debug)]
+pub enum Decl {
+    Const(ConstDecl),
+    // Var(VarDecl)
+}
+
+
+#[derive(Debug)]
+pub struct ConstDecl {
+    pub defs: Vec<ConstDef>,
+}
+
+
+#[derive(Debug)]
+pub struct ConstDef {
+    pub ident: String,
+    pub value: ConstInitVal,
+}
+
+pub type ConstInitVal = ConstExp;
+
+pub type ConstExp = Exp;
+
+// #[derive(Debug)]
+// pub enum VarDecl {
+//     Type(BType),
+//     Def(VarDef, Box<VarDecl>)
+// }
+
+#[derive(Debug)]
+pub enum VarDef {
+    Ident(Ident),
+    InitVal(Ident, InitVal),
+}
+
+pub type Ident = String;
+
+pub type InitVal = Exp;
+
 #[derive(Debug)]
 pub struct FuncDef {
     pub func_type: FuncType,
-    pub ident: String,
+    pub ident: Ident,
     pub block: Block,
 }
 #[derive(Debug)]
@@ -14,17 +54,36 @@ pub enum FuncType {
 }
 #[derive(Debug)]
 pub struct Block {
-    pub stmt: Stmt,
+    pub items: Vec<BlockItem>,
 }
+
 #[derive(Debug)]
-pub struct Stmt {
-    pub exp: Exp,
+pub enum BlockItem {
+    Decl(Decl),
+    Stmt(Stmt),
+}
+
+#[derive(Debug)]
+pub enum Stmt {
+    // LVal(LVal, Exp),
+    Ret(Exp)
 }
 
 #[derive(Debug)]
 pub enum Exp {
     Exp(LOrExp),
 }
+
+pub type LVal = Ident;
+
+#[derive(Debug)]
+pub enum PrimaryExp {
+    Exp(Box<Exp>),
+    LVal(LVal),
+    Number(Number),
+}
+
+pub type Number = i32;
 
 #[derive(Debug)]
 pub enum UnaryExp {
@@ -39,13 +98,6 @@ pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug)]
-pub enum PrimaryExp {
-    Exp(Box<Exp>), // bracket
-    Number(Number),
-}
-
-pub type Number = i32;
 
 #[derive(Debug)]
 pub enum MulExp {

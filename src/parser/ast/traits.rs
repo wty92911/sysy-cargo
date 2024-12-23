@@ -1,6 +1,7 @@
 use crate::parser::ast::structs::*;
 use koopa::ir::{builder_traits::*, *};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::parser::ast::vm::ValueManager;
 
 static CNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -53,6 +54,7 @@ impl Into<Program> for CompUnit {
             func: main,
             bb,
             v: None,
+            vm: ValueManager::new(),
         };
         // parse exp
         self.func_def.block.build(&mut program, &mut params);
@@ -66,6 +68,9 @@ struct BuildParams {
     bb: BasicBlock,
     /// last value
     v: Option<Value>,
+
+    /// variable manager
+    vm: ValueManager,
 }
 
 impl Into<Type> for FuncType {
@@ -78,24 +83,63 @@ impl Into<Type> for FuncType {
 
 impl Block {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
-        self.stmt.build(program, params);
+        for item in self.items.iter() {
+            item.build(program, params);
+        }
     }
 }
 
+impl BlockItem {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            BlockItem::Stmt(stmt) => stmt.build(program, params),
+            BlockItem::Decl(decl) => decl.build(program, params),
+        }
+    }
+}
+
+
 impl Stmt {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
-        self.exp.build(program, params);
+        match self {
+            Stmt::Ret(exp) => {
+                exp.build(program, params);
 
-        // create a new basic block for ret
-        let func_data = program.func_mut(params.func);
-       
-        let ret = func_data.dfg_mut().new_value().ret(params.v);
-        func_data
-            .layout_mut()
-            .bb_mut(params.bb)
-            .insts_mut()
-            .extend([ret]);
-        params.v = None; // clear
+                // create a new basic block for ret
+                let func_data = program.func_mut(params.func);
+            
+                let ret = func_data.dfg_mut().new_value().ret(params.v);
+                func_data
+                    .layout_mut()
+                    .bb_mut(params.bb)
+                    .insts_mut()
+                    .extend([ret]);
+                params.v = None; // clear
+            }
+        }
+    }
+}
+
+impl Decl {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            Decl::Const(decl) => decl.build(program, params),
+        }
+    }
+}
+
+impl ConstDecl {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        for def in self.defs.iter() {
+            def.build(program, params);
+        }
+    }
+}
+
+impl ConstDef {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        let v = self.value.calc(params);
+        params.vm.insert_const(self.ident.as_str(), v);
     }
 }
 
@@ -106,45 +150,16 @@ impl Exp {
             Exp::Exp(exp) => exp.build(program, params),
         }
     }
-}
 
-impl UnaryExp {
-    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+    fn calc(&self, params: &mut BuildParams) -> i32 {
         match self {
-            UnaryExp::PrimaryExp(exp) => exp.build(program, params),
-            UnaryExp::UnaryOp(op, exp) => {
-                // build next exp recursively
-                exp.build(program, params);
-                let unary_v = params.v.take().unwrap();
-                // op instruction
-                let op = match op {
-                    UnaryOp::Plus => BinaryOp::Add,
-                    UnaryOp::Minus => BinaryOp::Sub,
-                    UnaryOp::Not => BinaryOp::Eq,
-                };
-                let func_data = program.func_mut(params.func);
-                let zero = func_data.dfg_mut().new_value().integer(0);
-
-                insert_op!(program, params, op, zero, unary_v);
-            }
+            Exp::Exp(exp) => exp.calc(params),
         }
     }
 }
 
-impl PrimaryExp {
-    fn build(&self, program: &mut Program, params: &mut BuildParams) {
-        match self {
-            PrimaryExp::Exp(exp) => exp.build(program, params),
-            PrimaryExp::Number(num) => {
-                let func_data = program.func_mut(params.func);
-                let value = func_data.dfg_mut().new_value().integer(*num);
-                params.v = Some(value);
-                // just a number, don't need to create a instruction
-                // func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([value]);
-            }
-        }
-    }
-}
+
+
 
 impl AddExp {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
@@ -163,18 +178,16 @@ impl AddExp {
                 };
 
                 insert_op!(program, params, op, add_v, mul_v);
-                // let func_data = program.func_mut(params.func);
-                // let op = func_data
-                //     .dfg_mut()
-                //     .new_value()
-                //     .binary(op, add_v, mul_v);
-                // params.v = Some(op);
-                // func_data
-                //     .layout_mut()
-                //     .bb_mut(params.bb)
-                //     .insts_mut()
-                //     .extend([op]);
+            }
+        }
+    }
 
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            AddExp::MulExp(exp) => exp.calc(params),
+            AddExp::AddExp(add_exp, op, mul_exp) => match op {
+                AddOp::Add => add_exp.calc(params) + mul_exp.calc(params),
+                AddOp::Sub => add_exp.calc(params) - mul_exp.calc(params),
             }
         }
     }
@@ -198,6 +211,80 @@ impl MulExp {
                 };
                 insert_op!(program, params, op, mul_v, unary_v);
             }
+        }
+    }
+
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            MulExp::UnaryExp(exp) => exp.calc(params),
+            MulExp::MulExp(mul_exp, op, unary_exp) => match op {
+                MulOp::Mul => mul_exp.calc(params) * unary_exp.calc(params),
+                MulOp::Div => mul_exp.calc(params) / unary_exp.calc(params),
+                MulOp::Mod => mul_exp.calc(params) % unary_exp.calc(params),
+            }
+        }
+    }
+}
+
+
+impl UnaryExp {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            UnaryExp::PrimaryExp(exp) => exp.build(program, params),
+            UnaryExp::UnaryOp(op, exp) => {
+                // build next exp recursively
+                exp.build(program, params);
+                let unary_v = params.v.take().unwrap();
+                // op instruction
+                let op = match op {
+                    UnaryOp::Plus => BinaryOp::Add,
+                    UnaryOp::Minus => BinaryOp::Sub,
+                    UnaryOp::Not => BinaryOp::Eq,
+                };
+                let func_data = program.func_mut(params.func);
+                let zero = func_data.dfg_mut().new_value().integer(0);
+
+                insert_op!(program, params, op, zero, unary_v);
+            }
+        }
+    }
+
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            UnaryExp::PrimaryExp(exp) => exp.calc(params),
+            UnaryExp::UnaryOp(op, exp) => match op {
+                UnaryOp::Plus => exp.calc(params),
+                UnaryOp::Minus => -exp.calc(params),
+                UnaryOp::Not => !exp.calc(params),
+            }
+        }
+    }
+}
+
+impl PrimaryExp {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            PrimaryExp::Exp(exp) => exp.build(program, params),
+            PrimaryExp::Number(num) => {
+                let func_data = program.func_mut(params.func);
+                let value = func_data.dfg_mut().new_value().integer(*num);
+                params.v = Some(value);
+                // just a number, don't need to create a instruction
+                // func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([value]);
+            }
+            PrimaryExp::LVal(lval) => {
+                let func_data = program.func_mut(params.func);
+                let value = func_data.dfg_mut().new_value().integer(params.vm.get_const(&lval).unwrap());
+                params.v = Some(value);
+            }
+        }
+    }
+
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            PrimaryExp::Exp(exp) => exp.calc(params),
+            PrimaryExp::Number(num) => *num,
+            PrimaryExp::LVal(lval) => params.vm.get_const(lval).unwrap(),
         }
     }
 }
@@ -224,6 +311,14 @@ impl LOrExp {
             }
         }
     }
+
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            LOrExp::LAndExp(exp) => exp.calc(params),
+            LOrExp::LOrExp(lor_exp, land_exp) => 
+                (lor_exp.calc(params) != 0 || land_exp.calc(params) != 0).into()
+        }
+    }
 }
 
 impl LAndExp {
@@ -248,6 +343,14 @@ impl LAndExp {
             }
         }
     }
+
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            LAndExp::EqExp(exp) => exp.calc(params),
+            LAndExp::LAndExp(land_exp, eq_exp) => 
+               (land_exp.calc(params) != 0 && eq_exp.calc(params) != 0).into()
+        }
+    }
 }
 
 impl EqExp {
@@ -267,6 +370,17 @@ impl EqExp {
                 };
                 insert_op!(program, params, op, eq_v, rel_v);
             }
+        }
+    }
+
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            EqExp::RelExp(exp) => exp.calc(params),
+            EqExp::EqExp(eq_exp, eq_op, rel_exp) => match eq_op {
+                EqOp::Eq => eq_exp.calc(params) == rel_exp.calc(params) ,
+                EqOp::Ne => eq_exp.calc(params) != rel_exp.calc(params),
+            }.into()
+            
         }
     }
 }
@@ -290,6 +404,18 @@ impl RelExp {
                 };
                 insert_op!(program, params, op, rel_v, add_v);
             }
+        }
+    }
+
+    fn calc(&self, params: &mut BuildParams) -> i32 {
+        match self {
+            RelExp::AddExp(exp) => exp.calc(params),
+            RelExp::RelExp(rel_exp, rel_op, add_exp) => match rel_op {
+                RelOp::Lt => rel_exp.calc(params) < add_exp.calc(params),
+                RelOp::Le => rel_exp.calc(params) <= add_exp.calc(params),
+                RelOp::Gt => rel_exp.calc(params) > add_exp.calc(params),
+                RelOp::Ge => rel_exp.calc(params) >= add_exp.calc(params),
+            }.into()
         }
     }
 }
