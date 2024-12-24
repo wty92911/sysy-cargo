@@ -19,7 +19,7 @@ pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit{ <> };
 
 pub Decl: Decl = {
 	<c: ConstDecl> => Decl::Const(c),
-	// <v: VarDecl> => Decl::VarDecl(v),
+	<v: VarDecl> => Decl::Var(v),
 }
 
 pub ConstDecl: ConstDecl = {
@@ -30,13 +30,29 @@ pub ConstDecl: ConstDecl = {
 	}
 }
 
+pub VarDecl: VarDecl = {
+	"int" <def: VarDef> <defs: ("," <VarDef>)*> ";" => {
+		let mut v = VarDecl{ defs: vec![def] };
+		v.defs.extend(defs);
+		v
+	}
+}
 
 pub ConstDef: ConstDef = {
 	<ident: Ident> "=" <value: ConstInitVal> => ConstDef{ ident, value }
 }
 
+pub VarDef: VarDef = {
+	<ident: Ident> "=" <value: InitVal> => VarDef::InitVal(ident, value),
+	<ident: Ident> => VarDef::Ident(ident)
+}
+
 pub ConstInitVal: ConstInitVal = {
 	<const_exp: ConstExp> => <>
+}
+
+pub InitVal: InitVal = {
+	<exp: Exp> => <>.into()
 }
 
 pub ConstExp: ConstExp = {
@@ -58,7 +74,10 @@ BlockItem: BlockItem = {
 	<stmt: Stmt> => BlockItem::Stmt(stmt),
 }
 
-Stmt: Stmt = "return" <exp: Exp> ";" => Stmt::Ret(exp);
+Stmt: Stmt = {
+	"return" <exp: Exp> ";" => Stmt::Ret(exp),
+	<lval: LVal> "=" <exp: Exp> ";" => Stmt::LVal(lval, exp),
+}
 
 
 
@@ -71,7 +90,7 @@ PrimaryExp: PrimaryExp = {
 };
 
 LVal: LVal = {
-	<ident: Ident> => ident.into(),
+	<ident: Ident> => <>.into(),
 }
 
 UnaryExp: UnaryExp = {

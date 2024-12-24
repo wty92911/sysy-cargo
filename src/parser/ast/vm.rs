@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
-enum Value {
+use koopa::ir::Value;
+
+pub enum Decl {
     Const(i32),
+    Var(Value)
 }
 pub struct ValueManager {
-    vm: HashMap<String, Value>,
+    vm: HashMap<String, Decl>,
 }
 
 impl ValueManager {
@@ -14,14 +17,26 @@ impl ValueManager {
         }
     }
 
+    pub fn exist(&self, name: &str) -> bool {
+        self.vm.contains_key(name)
+    }
+
     pub fn insert_const(&mut self, name: &str, value: i32) {
-        self.vm.insert(name.to_string(), Value::Const(value));
+        self.vm.insert(name.to_string(), Decl::Const(value));
     }
 
     pub fn get_const(&self, name: &str) -> Option<i32> {
         match self.vm.get(name) {
-            Some(Value::Const(value)) => Some(*value),
+            Some(Decl::Const(value)) => Some(*value),
             _ => None,
         }
+    }
+
+    pub fn insert_var(&mut self, name: &str, value: Value) {
+        self.vm.insert(name.to_string(), Decl::Var(value));
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Decl> {
+        self.vm.get(name)
     }
 }

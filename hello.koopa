@@ -1,4 +1,10 @@
 fun @main(): i32 {
 %main_0:
-  ret 12324
+  %0 = alloc i32
+  store 10, %0
+  %1 = load %0
+  %2 = add %1, 1
+  store %2, %0
+  %3 = load %0
+  ret %3
 }

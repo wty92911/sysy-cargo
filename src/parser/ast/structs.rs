@@ -6,13 +6,18 @@ pub struct CompUnit {
 #[derive(Debug)]
 pub enum Decl {
     Const(ConstDecl),
-    // Var(VarDecl)
+    Var(VarDecl)
 }
 
 
 #[derive(Debug)]
 pub struct ConstDecl {
     pub defs: Vec<ConstDef>,
+}
+
+#[derive(Debug)]
+pub struct VarDecl {
+    pub defs: Vec<VarDef>,
 }
 
 
@@ -22,21 +27,15 @@ pub struct ConstDef {
     pub value: ConstInitVal,
 }
 
-pub type ConstInitVal = ConstExp;
-
-pub type ConstExp = Exp;
-
-// #[derive(Debug)]
-// pub enum VarDecl {
-//     Type(BType),
-//     Def(VarDef, Box<VarDecl>)
-// }
-
 #[derive(Debug)]
 pub enum VarDef {
     Ident(Ident),
-    InitVal(Ident, InitVal),
+    InitVal(Ident, InitVal)
 }
+
+pub type ConstInitVal = ConstExp;
+
+pub type ConstExp = Exp;
 
 pub type Ident = String;
 
@@ -65,7 +64,7 @@ pub enum BlockItem {
 
 #[derive(Debug)]
 pub enum Stmt {
-    // LVal(LVal, Exp),
+    LVal(LVal, Exp),
     Ret(Exp)
 }
 

@@ -1,8 +1,8 @@
 use crate::parser::ast::structs::*;
 use koopa::ir::{builder_traits::*, *};
+use core::panic;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::parser::ast::vm::ValueManager;
-
+use crate::parser::ast::vm::{self, ValueManager};
 static CNT: AtomicUsize = AtomicUsize::new(0);
 
 macro_rules! next_bb_id {
@@ -116,6 +116,19 @@ impl Stmt {
                     .extend([ret]);
                 params.v = None; // clear
             }
+            Stmt::LVal(lval, exp) => {
+                exp.build(program, params);
+                let v = params.v.take().unwrap();
+                let func_data = program.func_mut(params.func);
+                let lv = params.vm.get(&lval).unwrap();
+                match *lv {
+                    vm::Decl::Var(lv) => {
+                        let s = func_data.dfg_mut().new_value().store(v, lv);
+                        func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([s]);
+                    }
+                    _ => panic!()
+                }
+            }
         }
     }
 }
@@ -124,11 +137,20 @@ impl Decl {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
         match self {
             Decl::Const(decl) => decl.build(program, params),
+            Decl::Var(decl) => decl.build(program, params),
         }
     }
 }
 
 impl ConstDecl {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        for def in self.defs.iter() {
+            def.build(program, params);
+        }
+    }
+}
+
+impl VarDecl {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
         for def in self.defs.iter() {
             def.build(program, params);
@@ -143,6 +165,28 @@ impl ConstDef {
     }
 }
 
+impl VarDef {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            VarDef::Ident(ident) => {
+                let func_data = program.func_mut(params.func);
+                let v = func_data.dfg_mut().new_value().alloc(Type::get_i32());
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([v]);
+                params.vm.insert_var(ident.as_str(), v);
+            }
+            VarDef::InitVal(ident,exp ) => {
+                exp.build(program, params);
+
+                let func_data = program.func_mut(params.func);
+                let v = func_data.dfg_mut().new_value().alloc(Type::get_i32());
+                params.vm.insert_var(ident.as_str(), v);
+                let exp_v = params.v.take().unwrap();
+                let s = func_data.dfg_mut().new_value().store(exp_v, v);
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([v, s]);
+            }
+        }
+    }
+}
 impl Exp {
     /// build exp
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
@@ -274,8 +318,19 @@ impl PrimaryExp {
             }
             PrimaryExp::LVal(lval) => {
                 let func_data = program.func_mut(params.func);
-                let value = func_data.dfg_mut().new_value().integer(params.vm.get_const(&lval).unwrap());
-                params.v = Some(value);
+                let v = params.vm.get(&lval).unwrap();
+                match *v {
+                    vm::Decl::Const(v) => {
+                        let value = func_data.dfg_mut().new_value().integer(v);
+                        params.v = Some(value);
+                    }
+                    vm::Decl::Var(v) => {
+                        let l = func_data.dfg_mut().new_value().load(v);
+                        func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([l]);
+                        params.v = Some(l);
+                    }
+                }
+               
             }
         }
     }
