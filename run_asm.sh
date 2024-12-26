@@ -1,1 +1,1 @@
-cargo run -- -riscv hello.c -o hello.asm
+RUST_BACKTRACE=1 cargo run -- -riscv hello.c -o hello.asm

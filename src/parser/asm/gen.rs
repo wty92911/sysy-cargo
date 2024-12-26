@@ -1,26 +1,39 @@
 use koopa::ir::Value;
 use std::collections::HashMap;
+use std::io::{Result, Write};
+use rand::{random, thread_rng};
+use rand::prelude::IndexedRandom;
+
+#[derive(Copy, Clone, Debug)]
+pub enum Mem {
+    Stack(u32),
+    Const(i32)
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum ValueStore {
-    Const(i32),
     Reg(Reg),
+    Mem(Mem),
 }
-
+// todo last store
 pub type Reg = u8;
-
+pub const A0: Reg = 15;
 pub struct RegNode {
     pub value: Option<Value>,
     pub name: &'static str,
 }
 
 pub struct ValueManager {
+    cur_offset: u32,
+    max_offset: u32,
     regs: HashMap<Reg, RegNode>,
-    values: HashMap<Value, ValueStore>,
+    avail_regs: Vec<Reg>,
+    value_reg: HashMap<Value, Reg>,
+    value_mem: HashMap<Value, Mem>,
 }
 
 impl ValueManager {
-    pub fn new() -> ValueManager {
+    pub fn new() -> Self {
         let mut regs = HashMap::new();
         regs.insert(
             0,
@@ -58,11 +71,18 @@ impl ValueManager {
         for &(name, num) in &arg_regs {
             regs.insert(num, RegNode { value: None, name });
         }
-
         ValueManager {
+            cur_offset: 0,
+            max_offset: 0,
             regs,
-            values: HashMap::new(),
+            avail_regs: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], // except x0
+            value_reg: HashMap::new(),
+            value_mem: HashMap::new(),
         }
+    }
+
+    pub fn set_max_offset(&mut self, max_offset: u32) {
+        self.max_offset = max_offset;
     }
 
     pub fn get_reg(&self, reg: Reg) -> Option<&RegNode> {
@@ -76,58 +96,132 @@ impl ValueManager {
         self.regs.get_mut(&reg)
     }
 
-    pub fn alloc_reg(&mut self) -> Reg {
-        for (reg, reg_node) in self.regs.iter() {
-            if reg_node.value.is_none() {
-                return *reg;
+
+
+    pub fn alloc_reg<W: Write>(&mut self, specific: Option<Reg>, w: &mut W) -> Reg {
+        let reg = specific.unwrap_or({
+            let mut rng = rand::rng();
+            let mut r = *self.avail_regs.choose(&mut rng).unwrap();
+            for reg in self.avail_regs.iter() {
+                let reg_node = self.regs.get(reg).unwrap();
+                if reg_node.value.is_none() {
+                   r = *reg
+                }
             }
+            // random choose one
+           r
+        });
+        if self.regs.get(&reg).unwrap().value.is_some() {
+            self.store_to_mem(reg, w);
         }
-        panic!("Out of registers!");
+        reg
     }
 
-    pub fn reset_reg(&mut self, reg: Reg) -> Option<String> {
-        let reg_node = self.regs.get_mut(&reg).unwrap();
-        let v = reg_node.value.take();
-        let name = reg_node.name;
-        match v {
-            Some(v) => {
-                for (r, rn) in self.regs.iter_mut() {
-                    if rn.value.is_none() {
-                        self.values.insert(v, ValueStore::Reg(*r));
-                        rn.value = Some(v);
-                        return Some(format!("mv {}, {}", rn.name, name));
+    pub fn get_value_mem(&self, value: &Value) -> Option<&Mem> {
+        self.value_mem.get(value)
+    }
+
+    pub fn get_value_store(&self, value: &Value) -> Option<ValueStore> {
+        if let Some(reg) = self.value_reg.get(value) {
+            return Some(ValueStore::Reg(*reg));
+        } else if let Some(mem) = self.value_mem.get(value) {
+            return Some(ValueStore::Mem(*mem));
+        }
+        None
+    }
+
+    /// bind value and store reg or set mem
+    pub fn set_value_store(&mut self, value: Value, store: ValueStore) {
+        match store {
+            ValueStore::Reg(r) => {
+                self.value_reg.insert(value, r);
+                let node = self.regs.get_mut(&r).unwrap();
+                // clear old value
+                if let Some(v) = node.value {
+                    // todo: should we store old value to memory?
+                    self.value_reg.remove(&v);
+                }
+                node.value = Some(value);
+            }
+            ValueStore::Mem(m) => {
+                self.value_mem.insert(value, m);
+            }
+        }
+    }
+
+    pub fn load_to_reg<W: Write>(&mut self, value: Value, specific: Option<Reg>, w: &mut W) -> Result<Reg> {
+        let store = self.get_value_store(&value).unwrap();
+
+        match store {
+            ValueStore::Mem(m) => {
+                let reg = self.alloc_reg(specific, w);
+                self.set_value_store(value, ValueStore::Reg(reg));
+                let name =  self.regs.get(&reg).unwrap().name;
+                match m {
+                    Mem::Const(i) => {
+                        writeln!(w, "  li {}, {}", name, i)?;
+                    }
+                    Mem::Stack(s) => {
+                        writeln!(w, "  lw {}, {}(sp)", name, s)?;
                     }
                 }
-                unimplemented!()
+                Ok(reg)
             }
-            None => None,
+            ValueStore::Reg(r) => {
+                match specific {
+                    Some(_) => {
+                        let reg = self.alloc_reg(specific, w);
+                        dbg!(specific, reg);
+                        self.set_value_store(value, ValueStore::Reg(reg));
+                        let name =  self.regs.get(&reg).unwrap().name;
+                        if r != reg {
+                            writeln!(w, "  mv {}, {}", name, self.get_reg_name(r))?;
+                        }
+                        Ok(reg)
+                    }
+                    None => {
+                        Ok(r)
+                    }
+                }
+            },
         }
-        //
-    }
-    pub fn get_value(&self, value: Value) -> Option<&ValueStore> {
-        self.values.get(&value)
     }
 
-    pub fn set_value(&mut self, value: Value, store: ValueStore) {
-        self.values.insert(value, store);
+    // alloc on stack
+    pub fn alloc(&mut self, value: &Value, size: u32) -> Result<()> {
+        self.set_value_store(*value, ValueStore::Mem(Mem::Stack(self.cur_offset)));
+        self.cur_offset += size;
+        Ok(())
     }
 
-    pub fn get_store_name(&self, store: ValueStore) -> String {
-        match store {
-            ValueStore::Const(i) => i.to_string(),
-            ValueStore::Reg(r) => self.get_reg_name(r).to_string(),
-        }
-    }
-
-    pub fn load_reg(&mut self, value: Value) -> Option<String> {
-        let store = *self.get_value(value).unwrap();
-        match store {
-            ValueStore::Const(i) => {
-                let reg = self.alloc_reg();
-                self.set_value(value, ValueStore::Reg(reg));
-                Some(format!("li {}, {}", self.get_reg_name(reg), i))
+    /// store value of reg to mem, and change reg
+    fn store_to_mem<W: Write>(&mut self, reg: Reg, w: &mut W) {
+        let node = self.regs.get_mut(&reg).unwrap();
+        if let Some(value) = node.value.take() {
+            let mem = self.value_mem.get(&value).unwrap();
+            match mem {
+                Mem::Const(_) => {} // do nothing
+                Mem::Stack(s) => {
+                    writeln!(w, "  sw {}, {}(sp)", node.name, s).unwrap();
+                    dbg!(format!("  sw {}, {}(sp)", node.name, s));
+                }
             }
-            ValueStore::Reg(_) => None,
         }
     }
+
+    pub fn copy_to_mem<W: Write>(&mut self, reg: Reg, w: &mut W) {
+        let node = self.regs.get(&reg).unwrap();
+        if let Some(value) = node.value {
+            let mem = self.value_mem.get(&value).unwrap();
+            match mem {
+                Mem::Const(_) => {} // do nothing
+                Mem::Stack(s) => {
+                    writeln!(w, "  sw {}, {}(sp)", self.get_reg_name(reg), s).unwrap();
+                    dbg!(format!("  sw {}, {}(sp)", node.name, s));
+                }
+            }
+        }
+
+    }
+
 }

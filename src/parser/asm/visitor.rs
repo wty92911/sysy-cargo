@@ -1,5 +1,5 @@
 use crate::parser::asm::gen::*;
-use koopa::ir::entities::FunctionData;
+use koopa::ir::entities::{FunctionData, ValueData};
 use koopa::ir::layout::BasicBlockNode;
 use koopa::ir::values::*;
 use koopa::ir::{BasicBlock, Program, Value, ValueKind};
@@ -59,6 +59,19 @@ impl<W: Write> VisitorImpl<'_, W> {
 
     /// Generates the given basic block.
     fn visit_bb(&mut self, bb: BasicBlock, node: &BasicBlockNode) -> Result<()> {
+        // calc stack size
+        let mut stack_size = 0;
+        node.insts().iter().for_each(|(value,_)| {
+            stack_size += self.func.unwrap().dfg().value(*value).ty().size();
+        });
+        dbg!(stack_size);
+        stack_size = (stack_size + 15) / 16 * 16;
+        dbg!(stack_size);
+        if stack_size > 2048 {
+            todo!();
+        }
+        writeln!(self.w, "  addi sp, sp, -{}", stack_size)?;
+        self.vm.set_max_offset(stack_size as u32);
         for inst in node.insts().keys() {
             self.visit_local_inst(inst)?;
         }
@@ -69,8 +82,33 @@ impl<W: Write> VisitorImpl<'_, W> {
     fn visit_local_inst(&mut self, inst: &Value) -> Result<()> {
         let value_data = self.func.unwrap().dfg().value(*inst);
         match value_data.kind() {
+            ValueKind::Alloc(_) => {
+                self.vm.alloc(inst, 4)?;
+            }
+            ValueKind::Load(l) => {
+                self.vm.alloc(inst, 4)?;
+                // warn! must be sure the src() value is loaded from memory,
+                // or the value of l.src never use again.
+
+                // to make sure of this, we must store the value of reg to memory
+                // when the value is changed
+                let reg = self.vm.load_to_reg(l.src(), None, self.w)?;
+                self.vm.set_value_store(*inst, ValueStore::Reg(reg));
+                // copy value of reg to memory
+                self.vm.copy_to_mem(reg, self.w);
+            }
+            ValueKind::Store(s) => {
+                self.visit_const(s.value())?;
+                let reg = self.vm.load_to_reg(s.value(), None, self.w)?;
+                self.vm.set_value_store(s.dest(), ValueStore::Reg(reg));
+                // here we use copy to avoid load again when the value of reg is used
+                self.vm.copy_to_mem(reg, self.w);
+            }
             ValueKind::Binary(b) => {
+                self.vm.alloc(inst, 4)?;
                 self.visit_binary(inst, b)?;
+                let reg = self.vm.load_to_reg(*inst, None, self.w)?;
+                self.vm.copy_to_mem(reg, self.w)
             }
             ValueKind::Return(v) => self.visit_return(v)?,
             _ => unimplemented!(),
@@ -78,36 +116,13 @@ impl<W: Write> VisitorImpl<'_, W> {
         Ok(())
     }
 
+
+
     /// Generates function return.
     fn visit_return(&mut self, ret: &Return) -> Result<()> {
         if let Some(val) = ret.value() {
-            self.visit_value(val)?;
-            let val = self
-                .vm
-                .get_value(val)
-                .expect(&format!("value {:#?} not found", val));
-
-            match *val {
-                ValueStore::Const(v) => {
-                    if let Some(inst) = self.vm.reset_reg(15) {
-                        writeln!(self.w, "  {}", inst)?;
-                    }
-                    writeln!(self.w, "  li {}, {}", self.vm.get_reg_name(15), v)?;
-                }
-                ValueStore::Reg(r) => {
-                    if r != 15 {
-                        if let Some(inst) = self.vm.reset_reg(15) {
-                            writeln!(self.w, "  {}", inst)?;
-                        }
-                        write!(
-                            self.w,
-                            "  mv {}, {}",
-                            self.vm.get_reg_name(15),
-                            self.vm.get_reg_name(r)
-                        )?;
-                    }
-                }
-            }
+            self.visit_const(val)?;
+            self.vm.load_to_reg(val, Some(A0), self.w)?;
         }
         writeln!(self.w, "  ret")?;
         Ok(())
@@ -115,53 +130,24 @@ impl<W: Write> VisitorImpl<'_, W> {
 
     /// Generates the given binary operation._
     fn visit_binary(&mut self, value: &Value, b: &Binary) -> Result<()> {
-        self.visit_value(b.lhs())?;
-        self.visit_value(b.rhs())?;
+        self.visit_const(b.lhs())?;
+        self.visit_const(b.rhs())?;
 
         let (lvs, rvs) = (
-            *self.vm.get_value(b.lhs()).unwrap(),
-            *self.vm.get_value(b.rhs()).unwrap(),
+            self.vm.get_value_store(&b.lhs()).unwrap(),
+            self.vm.get_value_store(&b.rhs()).unwrap(),
         );
-        // let (lvs, rvs) = (self.vm.get_store_name(lvs), self.vm.get_store_name(rvs));
-        // deal const val
-        if let (ValueStore::Const(lv), ValueStore::Const(rv)) = (lvs, rvs) {
-            dbg!("const: ", lv, rv);
-            let bv = ValueStore::Const(match b.op() {
-                BinaryOp::Eq => (lv == rv) as i32,
-                BinaryOp::NotEq => (lv != rv) as i32,
-                BinaryOp::Lt => (lv < rv) as i32,
-                BinaryOp::Gt => (lv > rv) as i32,
-                BinaryOp::Le => (lv <= rv) as i32,
-                BinaryOp::Ge => (lv >= rv) as i32,
-                BinaryOp::And => lv & rv,
-                BinaryOp::Or => lv | rv,
-                BinaryOp::Add => lv + rv,
-                BinaryOp::Sub => lv - rv,
-                BinaryOp::Mul => lv * rv,
-                BinaryOp::Div => lv / rv,
-                BinaryOp::Mod => lv % rv,
-                _ => unimplemented!("not implemented"),
-            });
-            self.vm.set_value(*value, bv);
-            return Ok(());
-        }
 
         // deal reg, for now load all const to reg
-        let rd = self.vm.alloc_reg();
+        let rd = self.vm.alloc_reg(None, self.w);
+        self.vm.set_value_store(*value, ValueStore::Reg(rd));
+
         let rd_name = self.vm.get_reg_name(rd);
 
-        if let Some(inst) = self.vm.load_reg(b.lhs()) {
-            writeln!(self.w, "  {}", inst)?;
-        }
-        if let Some(inst) = self.vm.load_reg(b.rhs()) {
-            writeln!(self.w, "  {}", inst)?;
-        }
-        let (lvs, rvs) = (
-            *self.vm.get_value(b.lhs()).unwrap(),
-            *self.vm.get_value(b.rhs()).unwrap(),
-        );
-        let (lvs, rvs) = (self.vm.get_store_name(lvs), self.vm.get_store_name(rvs));
+        let lvs = self.vm.load_to_reg(b.lhs(), None, self.w)?;
+        let rvs = self.vm.load_to_reg(b.rhs(), None, self.w)?;
 
+        let (lvs, rvs) = (self.vm.get_reg_name(lvs), self.vm.get_reg_name(rvs));
         match b.op() {
             BinaryOp::Eq => {
                 writeln!(self.w, "  sub {}, {}, {}", rd_name, lvs, rvs)?;
@@ -185,6 +171,9 @@ impl<W: Write> VisitorImpl<'_, W> {
                 writeln!(self.w, "  slt {}, {}, {}", rd_name, lvs, rvs)?;
                 writeln!(self.w, "  seqz {}, {}", rd_name, rd_name)?;
             }
+            BinaryOp::And => {
+                writeln!(self.w, "  and {}, {}, {}", rd_name, lvs, rvs)?;
+            }
             BinaryOp::Or => {
                 writeln!(self.w, "  or {}, {}, {}", rd_name, lvs, rvs)?;
             }
@@ -206,23 +195,18 @@ impl<W: Write> VisitorImpl<'_, W> {
             _ => unimplemented!("not implemented"),
         }
 
-        self.vm.set_value(*value, ValueStore::Reg(rd));
         Ok(())
     }
 
     /// check if const, add it to vm
-    fn visit_value(&mut self, v: Value) -> Result<()> {
+    fn visit_const(&mut self, v: Value) -> Result<()> {
         let data = self.func.unwrap().dfg().value(v);
         match data.kind() {
             ValueKind::Integer(i) => {
-                self.vm.set_value(v, ValueStore::Const(i.value()));
+                self.vm.set_value_store(v, ValueStore::Mem(Mem::Const(i.value())));
             }
-            ValueKind::Binary(_) => {
-                // do nothing
-            }
-            _ => unimplemented!("not implemented"),
+            _ => {}
         }
-
         Ok(())
     }
 }
