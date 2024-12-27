@@ -1,4 +1,4 @@
-use crate::parser::asm::gen::*;
+use crate::asm::vm::*;
 use koopa::ir::entities::{FunctionData, ValueData};
 use koopa::ir::layout::BasicBlockNode;
 use koopa::ir::values::*;

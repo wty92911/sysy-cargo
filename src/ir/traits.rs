@@ -1,8 +1,8 @@
-use crate::parser::ast::structs::*;
+use crate::ir::structs::*;
 use koopa::ir::{builder_traits::*, *};
 use core::panic;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::parser::ast::vm::{self, ValueManager};
+use crate::ir::vm::{self, ValueManager};
 static CNT: AtomicUsize = AtomicUsize::new(0);
 
 macro_rules! next_bb_id {

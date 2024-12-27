@@ -1,4 +1,4 @@
-use compiler::parser::asm::visitor::Visitor;
+use compiler::asm::visitor::Visitor;
 use koopa::back::KoopaGenerator;
 use lalrpop_util::lalrpop_mod;
 use std::env::args;

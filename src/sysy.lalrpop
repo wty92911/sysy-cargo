@@ -11,7 +11,7 @@ match {
 	_
 }
 
-use compiler::parser::ast::structs::*;
+use compiler::ir::structs::*;
 
 // 定义 CompUnit, 其返回值类型为 String
 // parser 在解析完成后的行为是返回 FuncDef 的值

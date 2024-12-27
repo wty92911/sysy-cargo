@@ -1,2 +1,2 @@
-pub mod gen;
+pub mod vm;
 pub mod visitor;
