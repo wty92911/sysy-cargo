@@ -7,36 +7,46 @@ pub enum Decl {
     Var(Value)
 }
 pub struct ValueManager {
-    vm: HashMap<String, Decl>,
+    vm_stack: Vec<HashMap<String, Decl>>
 }
 
 impl ValueManager {
     pub fn new() -> Self {
         ValueManager {
-            vm: HashMap::new(),
+            vm_stack: Vec::new(),
         }
     }
 
-    pub fn exist(&self, name: &str) -> bool {
-        self.vm.contains_key(name)
+    pub fn cur_exist(&self, name: &str) -> bool {
+        match self.vm_stack.last() {
+            Some(vm) => vm.contains_key(name),
+            None => false,
+        }
+    }
+
+    pub fn push(&mut self) {
+        self.vm_stack.push(HashMap::new());
+    }
+
+    pub fn pop(&mut self) {
+        self.vm_stack.pop();
+    }
+
+    fn insert(&mut self, name: &str, value: Decl) {
+        let vm = self.vm_stack.last_mut().unwrap();
+        assert_eq!(vm.contains_key(name), false);
+        vm.insert(name.to_string(), value);
     }
 
     pub fn insert_const(&mut self, name: &str, value: i32) {
-        self.vm.insert(name.to_string(), Decl::Const(value));
-    }
-
-    pub fn get_const(&self, name: &str) -> Option<i32> {
-        match self.vm.get(name) {
-            Some(Decl::Const(value)) => Some(*value),
-            _ => None,
-        }
+        self.insert(name, Decl::Const(value));
     }
 
     pub fn insert_var(&mut self, name: &str, value: Value) {
-        self.vm.insert(name.to_string(), Decl::Var(value));
+        self.insert(name, Decl::Var(value));
     }
 
     pub fn get(&self, name: &str) -> Option<&Decl> {
-        self.vm.get(name)
+        self.vm_stack.iter().rev().find_map(|vm| vm.get(name))
     }
 }

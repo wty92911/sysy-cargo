@@ -2,7 +2,7 @@ use crate::asm::vm::*;
 use koopa::ir::entities::{FunctionData, ValueData};
 use koopa::ir::layout::BasicBlockNode;
 use koopa::ir::values::*;
-use koopa::ir::{BasicBlock, Program, Value, ValueKind};
+use koopa::ir::{BasicBlock, Program, TypeKind, Value, ValueKind};
 use std::io::{Result, Write};
 
 /// Visitor for generating the in-memory form Koopa IR program into the riscv
@@ -62,11 +62,13 @@ impl<W: Write> VisitorImpl<'_, W> {
         // calc stack size
         let mut stack_size = 0;
         node.insts().iter().for_each(|(value,_)| {
-            stack_size += self.func.unwrap().dfg().value(*value).ty().size();
+            match self.func.unwrap().dfg().value(*value).ty().kind() {
+                TypeKind::Int32 => stack_size += 4,
+                TypeKind::Pointer(_) => stack_size += 4,
+                _ => {}
+            }
         });
-        dbg!(stack_size);
         stack_size = (stack_size + 15) / 16 * 16;
-        dbg!(stack_size);
         if stack_size > 2048 {
             todo!();
         }
@@ -92,6 +94,7 @@ impl<W: Write> VisitorImpl<'_, W> {
 
                 // to make sure of this, we must store the value of reg to memory
                 // when the value is changed
+
                 let reg = self.vm.load_to_reg(l.src(), None, self.w)?;
                 self.vm.set_value_store(*inst, ValueStore::Reg(reg));
                 // copy value of reg to memory
@@ -133,20 +136,17 @@ impl<W: Write> VisitorImpl<'_, W> {
         self.visit_const(b.lhs())?;
         self.visit_const(b.rhs())?;
 
-        let (lvs, rvs) = (
-            self.vm.get_value_store(&b.lhs()).unwrap(),
-            self.vm.get_value_store(&b.rhs()).unwrap(),
-        );
-
         // deal reg, for now load all const to reg
         let rd = self.vm.alloc_reg(None, self.w);
         self.vm.set_value_store(*value, ValueStore::Reg(rd));
-
+        self.vm.lock_reg(rd);
         let rd_name = self.vm.get_reg_name(rd);
 
         let lvs = self.vm.load_to_reg(b.lhs(), None, self.w)?;
+        self.vm.lock_reg(lvs);
         let rvs = self.vm.load_to_reg(b.rhs(), None, self.w)?;
-
+        self.vm.unlock_reg(lvs);
+        self.vm.unlock_reg(rd);
         let (lvs, rvs) = (self.vm.get_reg_name(lvs), self.vm.get_reg_name(rvs));
         match b.op() {
             BinaryOp::Eq => {

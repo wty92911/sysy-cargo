@@ -83,9 +83,11 @@ impl Into<Type> for FuncType {
 
 impl Block {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        params.vm.push();
         for item in self.items.iter() {
             item.build(program, params);
         }
+        params.vm.pop();
     }
 }
 
@@ -102,20 +104,6 @@ impl BlockItem {
 impl Stmt {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
         match self {
-            Stmt::Ret(exp) => {
-                exp.build(program, params);
-
-                // create a new basic block for ret
-                let func_data = program.func_mut(params.func);
-            
-                let ret = func_data.dfg_mut().new_value().ret(params.v);
-                func_data
-                    .layout_mut()
-                    .bb_mut(params.bb)
-                    .insts_mut()
-                    .extend([ret]);
-                params.v = None; // clear
-            }
             Stmt::LVal(lval, exp) => {
                 exp.build(program, params);
                 let v = params.v.take().unwrap();
@@ -127,6 +115,23 @@ impl Stmt {
                         func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([s]);
                     }
                     _ => panic!()
+                }
+            }
+            Stmt::Exp(exp) => {} // todo?
+            Stmt::Block(block) => {
+                block.build(program, params)
+            }
+            Stmt::Ret(exp) => {
+                match exp {
+                    Some(exp) => {
+                        exp.build(program, params);
+                        // create a new basic block for ret
+                        let func_data = program.func_mut(params.func);
+                        let ret = func_data.dfg_mut().new_value().ret(params.v);
+                        func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([ret]);
+                        params.v = None; // clear
+                    }
+                    None => {}
                 }
             }
         }
@@ -339,7 +344,13 @@ impl PrimaryExp {
         match self {
             PrimaryExp::Exp(exp) => exp.calc(params),
             PrimaryExp::Number(num) => *num,
-            PrimaryExp::LVal(lval) => params.vm.get_const(lval).unwrap(),
+            PrimaryExp::LVal(lval) => {
+                let decl = params.vm.get(lval).unwrap();
+                match decl {
+                    vm::Decl::Const(v) => *v,
+                    vm::Decl::Var(v) => panic!()
+                }
+            },
         }
     }
 }

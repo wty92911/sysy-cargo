@@ -1,8 +1,8 @@
 use koopa::ir::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Result, Write};
 use rand::{random, thread_rng};
-use rand::prelude::IndexedRandom;
+use rand::prelude::{IndexedRandom, IteratorRandom};
 
 #[derive(Copy, Clone, Debug)]
 pub enum Mem {
@@ -18,6 +18,8 @@ pub enum ValueStore {
 // todo last store
 pub type Reg = u8;
 pub const A0: Reg = 15;
+
+#[derive(Copy, Clone, Debug)]
 pub struct RegNode {
     pub value: Option<Value>,
     pub name: &'static str,
@@ -27,7 +29,7 @@ pub struct ValueManager {
     cur_offset: u32,
     max_offset: u32,
     regs: HashMap<Reg, RegNode>,
-    avail_regs: Vec<Reg>,
+    avail_regs: HashSet<Reg>,
     value_reg: HashMap<Value, Reg>,
     value_mem: HashMap<Value, Mem>,
 }
@@ -35,6 +37,7 @@ pub struct ValueManager {
 impl ValueManager {
     pub fn new() -> Self {
         let mut regs = HashMap::new();
+        let mut avail_regs = HashSet::new();
         regs.insert(
             0,
             RegNode {
@@ -46,36 +49,40 @@ impl ValueManager {
         let temp_regs = [
             ("t0", 1),
             ("t1", 2),
-            ("t2", 3),
-            ("t3", 4),
-            ("t4", 5),
-            ("t5", 6),
-            ("t6", 7),
+            // ("t2", 3),
+            // ("t3", 4),
+            // ("t4", 5),
+            // ("t5", 6),
+            // ("t6", 7),
         ];
 
         for &(name, num) in &temp_regs {
             regs.insert(num, RegNode { value: None, name });
+            avail_regs.insert(num);
         }
 
         let arg_regs = [
-            ("a7", 8),
-            ("a1", 9),
-            ("a2", 10),
-            ("a3", 11),
-            ("a4", 12),
-            ("a5", 13),
-            ("a6", 14),
+            // ("a7", 8),
+            // ("a1", 9),
+            // ("a2", 10),
+            // ("a3", 11),
+            // ("a4", 12),
+            // ("a5", 13),
+            // ("a6", 14),
             ("a0", 15), // avoid use first
         ];
 
         for &(name, num) in &arg_regs {
             regs.insert(num, RegNode { value: None, name });
+            avail_regs.insert(num);
         }
+
         ValueManager {
             cur_offset: 0,
             max_offset: 0,
             regs,
-            avail_regs: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], // except x0
+            // avail_regs: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], // except x0
+            avail_regs, // except x0
             value_reg: HashMap::new(),
             value_mem: HashMap::new(),
         }
@@ -96,12 +103,18 @@ impl ValueManager {
         self.regs.get_mut(&reg)
     }
 
+    pub fn lock_reg(&mut self, reg: Reg) {
+        self.avail_regs.remove(&reg);
+    }
 
+    pub fn unlock_reg(&mut self, reg: Reg) {
+        self.avail_regs.insert(reg);
+    }
 
     pub fn alloc_reg<W: Write>(&mut self, specific: Option<Reg>, w: &mut W) -> Reg {
         let reg = specific.unwrap_or({
             let mut rng = rand::rng();
-            let mut r = *self.avail_regs.choose(&mut rng).unwrap();
+            let mut r = *self.avail_regs.iter().choose(&mut rng).unwrap();
             for reg in self.avail_regs.iter() {
                 let reg_node = self.regs.get(reg).unwrap();
                 if reg_node.value.is_none() {
@@ -111,6 +124,7 @@ impl ValueManager {
             // random choose one
            r
         });
+
         if self.regs.get(&reg).unwrap().value.is_some() {
             self.store_to_mem(reg, w);
         }
@@ -134,13 +148,12 @@ impl ValueManager {
     pub fn set_value_store(&mut self, value: Value, store: ValueStore) {
         match store {
             ValueStore::Reg(r) => {
-                self.value_reg.insert(value, r);
                 let node = self.regs.get_mut(&r).unwrap();
                 // clear old value
                 if let Some(v) = node.value {
-                    // todo: should we store old value to memory?
                     self.value_reg.remove(&v);
                 }
+                self.value_reg.insert(value, r);
                 node.value = Some(value);
             }
             ValueStore::Mem(m) => {
@@ -151,7 +164,6 @@ impl ValueManager {
 
     pub fn load_to_reg<W: Write>(&mut self, value: Value, specific: Option<Reg>, w: &mut W) -> Result<Reg> {
         let store = self.get_value_store(&value).unwrap();
-
         match store {
             ValueStore::Mem(m) => {
                 let reg = self.alloc_reg(specific, w);
@@ -171,7 +183,6 @@ impl ValueManager {
                 match specific {
                     Some(_) => {
                         let reg = self.alloc_reg(specific, w);
-                        dbg!(specific, reg);
                         self.set_value_store(value, ValueStore::Reg(reg));
                         let name =  self.regs.get(&reg).unwrap().name;
                         if r != reg {
@@ -198,12 +209,12 @@ impl ValueManager {
     fn store_to_mem<W: Write>(&mut self, reg: Reg, w: &mut W) {
         let node = self.regs.get_mut(&reg).unwrap();
         if let Some(value) = node.value.take() {
+            self.value_reg.remove(&value);
             let mem = self.value_mem.get(&value).unwrap();
             match mem {
                 Mem::Const(_) => {} // do nothing
                 Mem::Stack(s) => {
                     writeln!(w, "  sw {}, {}(sp)", node.name, s).unwrap();
-                    dbg!(format!("  sw {}, {}(sp)", node.name, s));
                 }
             }
         }
@@ -217,7 +228,6 @@ impl ValueManager {
                 Mem::Const(_) => {} // do nothing
                 Mem::Stack(s) => {
                     writeln!(w, "  sw {}, {}(sp)", self.get_reg_name(reg), s).unwrap();
-                    dbg!(format!("  sw {}, {}(sp)", node.name, s));
                 }
             }
         }

@@ -65,7 +65,9 @@ pub enum BlockItem {
 #[derive(Debug)]
 pub enum Stmt {
     LVal(LVal, Exp),
-    Ret(Exp)
+    Exp(Option<Exp>),
+    Block(Block),
+    Ret(Option<Exp>),
 }
 
 #[derive(Debug)]
