@@ -4,10 +4,12 @@ use koopa::ir::layout::BasicBlockNode;
 use koopa::ir::values::*;
 use koopa::ir::{BasicBlock, Program, TypeKind, Value, ValueKind};
 use std::io::{Result, Write};
+use std::ptr::write;
 
 /// Visitor for generating the in-memory form Koopa IR program into the riscv
 #[derive(Default)]
 pub struct Visitor;
+
 
 impl Visitor {
     pub fn visit<W: Write>(
@@ -20,6 +22,7 @@ impl Visitor {
             program,
             func: None,
             vm: ValueManager::new(),
+            stack_size: 0,
         };
         visitor.visit()
     }
@@ -31,6 +34,7 @@ struct VisitorImpl<'a, W: Write> {
     program: &'a Program,
     func: Option<&'a FunctionData>,
     vm: ValueManager,
+    stack_size: i32,
 }
 
 impl<W: Write> VisitorImpl<'_, W> {
@@ -50,7 +54,24 @@ impl<W: Write> VisitorImpl<'_, W> {
     /// Generates the given function
     fn visit_func(&mut self, func: &FunctionData) -> Result<()> {
         writeln!(self.w, "{}:", &func.name()[1..])?;
+        let mut stack_size = 0;
+        for (_i, (bb, node)) in func.layout().bbs().iter().enumerate() {
+            node.insts().iter().for_each(|(value,_)| {
+                match self.func.unwrap().dfg().value(*value).ty().kind() {
+                    TypeKind::Int32 => stack_size += 4,
+                    TypeKind::Pointer(_) => stack_size += 4,
+                    _ => {}
+                }
+            });
+        }
+        stack_size = (stack_size + 15) / 16 * 16;
+        if stack_size > 2048 {
+            todo!();
+        }
+        writeln!(self.w, "  addi sp, sp, -{}", stack_size)?;
+        self.stack_size = stack_size;
 
+        self.vm.set_max_offset(stack_size as u32);
         for (_i, (bb, node)) in func.layout().bbs().iter().enumerate() {
             self.visit_bb(*bb, node)?;
         }
@@ -58,22 +79,12 @@ impl<W: Write> VisitorImpl<'_, W> {
     }
 
     /// Generates the given basic block.
-    fn visit_bb(&mut self, _bb: BasicBlock, node: &BasicBlockNode) -> Result<()> {
+    fn visit_bb(&mut self, bb: BasicBlock, node: &BasicBlockNode) -> Result<()> {
         // calc stack size
-        let mut stack_size = 0;
-        node.insts().iter().for_each(|(value,_)| {
-            match self.func.unwrap().dfg().value(*value).ty().kind() {
-                TypeKind::Int32 => stack_size += 4,
-                TypeKind::Pointer(_) => stack_size += 4,
-                _ => {}
-            }
-        });
-        stack_size = (stack_size + 15) / 16 * 16;
-        if stack_size > 2048 {
-            todo!();
+        let bb_data = self.func.unwrap().dfg().bb(bb);
+        if let Some(name) = bb_data.name() {
+            writeln!(self.w, "{}", &(name.clone() + ":")[1..])?;
         }
-        writeln!(self.w, "  addi sp, sp, -{}", stack_size)?;
-        self.vm.set_max_offset(stack_size as u32);
         for inst in node.insts().keys() {
             self.visit_local_inst(inst)?;
         }
@@ -113,20 +124,43 @@ impl<W: Write> VisitorImpl<'_, W> {
                 let reg = self.vm.load_to_reg(*inst, None, self.w)?;
                 self.vm.copy_to_mem(reg, self.w)
             }
+            ValueKind::Branch(b) => self.visit_branch(b)?,
+            ValueKind::Jump(j) => self.visit_jump(j)?,
             ValueKind::Return(v) => self.visit_return(v)?,
             _ => unimplemented!(),
         };
         Ok(())
     }
 
+    /// Generates the given branch.
+    fn visit_branch(&mut self, b: &Branch) -> Result<()> {
+        self.vm.store_all_regs(self.w);
+        self.visit_const(b.cond())?;
+        let cond_reg = self.vm.load_to_reg(b.cond(), None, self.w)?;
+        let reg_name = self.vm.get_reg_name(cond_reg);
+        let true_name = self.func.unwrap().dfg().bb(b.true_bb()).name().clone();
+        let false_name = self.func.unwrap().dfg().bb(b.false_bb()).name().clone();
+        writeln!(self.w, "  bnez {}, {}", reg_name, &true_name.unwrap()[1..])?;
+        writeln!(self.w, "  j {}", &false_name.unwrap()[1..])?;
+        Ok(())
+    }
 
+    /// Generates the given jump.
+    fn visit_jump(&mut self, j: &Jump) -> Result<()> {
+        self.vm.store_all_regs(self.w);
+        let target_name = self.func.unwrap().dfg().bb(j.target()).name().clone();
+        writeln!(self.w, "  j {}", &target_name.unwrap()[1..])?;
+        Ok(())
+    }
 
     /// Generates function return.
     fn visit_return(&mut self, ret: &Return) -> Result<()> {
+        self.vm.store_all_regs(self.w);
         if let Some(val) = ret.value() {
             self.visit_const(val)?;
             self.vm.load_to_reg(val, Some(A0), self.w)?;
         }
+        writeln!(self.w, "  add sp, sp, {}", self.stack_size)?;
         writeln!(self.w, "  ret")?;
         Ok(())
     }
