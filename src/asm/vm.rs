@@ -235,13 +235,11 @@ impl ValueManager {
     /// store all regs to mem, for jump, return, call
     pub fn store_all_regs<W: Write>(&mut self, w: &mut W) {
         let mut regs = Vec::new();
-        
         for (reg, node) in self.regs.iter() {
             if let Some(value) = node.value {
                 regs.push(*reg);
             }
         }
-        
         for reg in regs {
             self.store_to_mem(reg, w);
         }

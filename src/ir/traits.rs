@@ -71,7 +71,7 @@ macro_rules! if_else {
             $params.vm.pop();
         }
         jump_ifn_ret!($program, $params, end_bb);
-        
+
 
         $params.bb = end_bb;
     };
@@ -199,7 +199,18 @@ impl SimpleStmt {
             SimpleStmt::Ret(exp) => {
                 match exp {
                     Some(exp) => {
+                        let func_data = program.func_mut(params.func);
+
+                        match func_data.layout().bbs().node(&params.bb).unwrap().insts().back_key() {
+                            Some(v) if matches!(func_data.dfg().value(*v).kind(), ValueKind::Return(_)) => {
+                                let ret_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%ret"));
+                                func_data.layout_mut().bbs_mut().extend([ret_bb]);
+                                params.bb = ret_bb;
+                            }
+                            _ => {}
+                        }
                         exp.build(program, params);
+                        
                         // create a new basic block for ret
                         let func_data = program.func_mut(params.func);
                         let ret = func_data.dfg_mut().new_value().ret(params.v);
@@ -435,20 +446,38 @@ impl LOrExp {
         match self {
             LOrExp::LAndExp(exp) => exp.build(program, params),
             LOrExp::LOrExp(lor_exp, land_exp) => {
+                let func_data = program.func_mut(params.func);
+                let result = func_data.dfg_mut().new_value().alloc(Type::get_i32());
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([result]);
+
+                let r_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%or_r"));
+                let end_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%or_end"));
+                func_data.layout_mut().bbs_mut().extend([r_bb, end_bb]);
+
                 lor_exp.build(program, params);
+
                 let lor_v = params.v.take().unwrap();
-                
+                let func_data = program.func_mut(params.func);
+                let l_store = func_data.dfg_mut().new_value().store(lor_v, result);
+                let l_br = func_data.dfg_mut().new_value().branch(lor_v, end_bb, r_bb);
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([l_store, l_br]);
+
+                params.bb = r_bb;
                 land_exp.build(program, params);
                 let land_v = params.v.take().unwrap();
-                
-
                 let func_data = program.func_mut(params.func);
+                let r_store = func_data.dfg_mut().new_value().store(land_v, result);
+                let r_br = func_data.dfg_mut().new_value().jump(end_bb);
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([r_store, r_br]);
+
+                params.bb = end_bb;
+                let func_data = program.func_mut(params.func);
+                let load = func_data.dfg_mut().new_value().load(result);
                 let zero = func_data.dfg_mut().new_value().integer(0);
-                let or_v = func_data.dfg_mut().new_value().binary(BinaryOp::Or, lor_v, land_v);
-                let res = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, or_v, zero);
+                let res = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, load, zero);
 
                 params.v = Some(res);
-                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([or_v, res]);
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([load, res]);
             }
         }
     }
@@ -467,20 +496,39 @@ impl LAndExp {
         match self {
             LAndExp::EqExp(exp) => exp.build(program, params),
             LAndExp::LAndExp(land_exp, eq_exp) => {
+                let func_data = program.func_mut(params.func);
+                let result = func_data.dfg_mut().new_value().alloc(Type::get_i32());
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([result]);
+
+                let r_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%and_r"));
+                let end_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%and_end"));
+                func_data.layout_mut().bbs_mut().extend([r_bb, end_bb]);
+
                 land_exp.build(program, params);
+
                 let land_v = params.v.take().unwrap();
-                
+                let func_data = program.func_mut(params.func);
+                let l_store = func_data.dfg_mut().new_value().store(land_v, result);
+                let zero = func_data.dfg_mut().new_value().integer(0);
+                let eq_zero = func_data.dfg_mut().new_value().binary(BinaryOp::Eq, land_v, zero);
+                let l_br = func_data.dfg_mut().new_value().branch(eq_zero, end_bb, r_bb);
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([l_store, eq_zero, l_br]);
+
+                params.bb = r_bb;
                 eq_exp.build(program, params);
                 let eq_v = params.v.take().unwrap();
-
                 let func_data = program.func_mut(params.func);
-                let zero = func_data.dfg_mut().new_value().integer(0);
+                let r_store = func_data.dfg_mut().new_value().store(eq_v, result);
+                let r_br = func_data.dfg_mut().new_value().jump(end_bb);
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([r_store, r_br]);
 
-                let l_v = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, land_v, zero);
-                let r_v = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, eq_v, zero);
-                let res = func_data.dfg_mut().new_value().binary(BinaryOp::And, l_v, r_v);
+                params.bb = end_bb;
+                let func_data = program.func_mut(params.func);
+                let load = func_data.dfg_mut().new_value().load(result);
+                let res = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, load, zero);
+
                 params.v = Some(res);
-                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([l_v, r_v, res]);
+                func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([load, res]);
             }
         }
     }
