@@ -75,12 +75,29 @@ BlockItem: BlockItem = {
 }
 
 Stmt: Stmt = {
-	<lval: LVal> "=" <exp: Exp> ";" => Stmt::LVal(lval, exp),
-    <exp: Exp> ";" => Stmt::Exp(Some(exp)),
-    ";" => Stmt::Exp(None),
-    <block: Block> => Stmt::Block(block),
-	"return" <exp: Exp> ";" => Stmt::Ret(Some(exp)),
-	"return" ";" => Stmt::Ret(None),
+	<stmt: OpenStmt> => Stmt::Open(Box::new(stmt)),
+	<stmt: ClosedStmt> => Stmt::Closed(Box::new(stmt)),
+}
+
+SimpleStmt: SimpleStmt = {
+	<lval: LVal> "=" <exp: Exp> ";" => SimpleStmt::LVal(lval, exp),
+    <exp: Exp> ";" => SimpleStmt::Exp(Some(exp)),
+    ";" => SimpleStmt::Exp(None),
+    <block: Block> => SimpleStmt::Block(block),
+	"return" <exp: Exp> ";" => SimpleStmt::Ret(Some(exp)),
+	"return" ";" => SimpleStmt::Ret(None),
+}
+
+OpenStmt: OpenStmt = {
+    "if" "(" <exp: Exp> ")" <stmt: Stmt> => OpenStmt::If(exp, stmt),
+    "if" "(" <exp: Exp> ")" <closed_stmt: ClosedStmt> "else" <open_stmt: OpenStmt> =>
+        OpenStmt::IfElse(exp, closed_stmt, Box::new(open_stmt)),
+}
+
+ClosedStmt: ClosedStmt = {
+    <stmt: SimpleStmt> => ClosedStmt::Simple(Box::new(stmt)),
+    "if" "(" <exp: Exp> ")" <closed_stmt1: ClosedStmt> "else" <closed_stmt2: ClosedStmt> =>
+        ClosedStmt::IfElse(exp, Box::new(closed_stmt1), Box::new(closed_stmt2)),
 }
 
 

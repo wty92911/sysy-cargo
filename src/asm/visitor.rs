@@ -1,5 +1,5 @@
 use crate::asm::vm::*;
-use koopa::ir::entities::{FunctionData, ValueData};
+use koopa::ir::entities::FunctionData;
 use koopa::ir::layout::BasicBlockNode;
 use koopa::ir::values::*;
 use koopa::ir::{BasicBlock, Program, TypeKind, Value, ValueKind};
@@ -13,8 +13,8 @@ impl Visitor {
     pub fn visit<W: Write>(
         &mut self,
         w: &mut W,
-        program: &koopa::ir::Program,
-    ) -> std::io::Result<()> {
+        program: &Program,
+    ) -> Result<()> {
         let mut visitor = VisitorImpl {
             w,
             program,
@@ -51,14 +51,14 @@ impl<W: Write> VisitorImpl<'_, W> {
     fn visit_func(&mut self, func: &FunctionData) -> Result<()> {
         writeln!(self.w, "{}:", &func.name()[1..])?;
 
-        for (i, (bb, node)) in func.layout().bbs().iter().enumerate() {
+        for (_i, (bb, node)) in func.layout().bbs().iter().enumerate() {
             self.visit_bb(*bb, node)?;
         }
         Ok(())
     }
 
     /// Generates the given basic block.
-    fn visit_bb(&mut self, bb: BasicBlock, node: &BasicBlockNode) -> Result<()> {
+    fn visit_bb(&mut self, _bb: BasicBlock, node: &BasicBlockNode) -> Result<()> {
         // calc stack size
         let mut stack_size = 0;
         node.insts().iter().for_each(|(value,_)| {

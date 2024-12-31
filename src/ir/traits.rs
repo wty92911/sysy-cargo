@@ -31,6 +31,51 @@ macro_rules! insert_op {
     };
 }
 
+macro_rules! jump_ifn_ret {
+    ($program:expr, $params:expr, $end_bb:expr) => {
+        let func_data = $program.func($params.func);
+        match func_data.layout().bbs().node(&$params.bb).unwrap().insts().back_key() {
+            Some(v) if matches!(func_data.dfg().value(*v).kind(), ValueKind::Return(_)) => {},
+            _ => {
+                let func_data = $program.func_mut($params.func);
+                let jump = func_data.dfg_mut().new_value().jump($end_bb);
+                func_data.layout_mut().bb_mut($params.bb).insts_mut().extend([jump]);
+            }
+        }
+    }
+}
+macro_rules! if_else {
+    ($program:expr, $params:expr, $exp:expr, $true_stmt:expr, $false_stmt:expr) => {
+        $exp.build($program, $params);
+        let exp_v = $params.v.take().unwrap();
+        let func_data = $program.func_mut($params.func);
+        let true_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%if"));
+        let false_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%else"));
+        let end_bb = func_data.dfg_mut().new_bb().basic_block(next_bb_id!("%if_end"));
+        func_data.layout_mut().bbs_mut().extend([true_bb, false_bb, end_bb]);
+
+        let branch = func_data.dfg_mut().new_value().branch(exp_v, true_bb, false_bb);
+        func_data.layout_mut().bb_mut($params.bb).insts_mut().extend([branch]);
+
+        $params.bb = true_bb;
+        $params.vm.push();
+        $true_stmt.build($program, $params);
+        jump_ifn_ret!($program, $params, end_bb);
+        $params.vm.pop();
+
+
+        $params.bb = false_bb;
+        if let Some(false_stmt) = $false_stmt {
+            $params.vm.push();
+            false_stmt.build($program, $params);
+            $params.vm.pop();
+        }
+        jump_ifn_ret!($program, $params, end_bb);
+        
+
+        $params.bb = end_bb;
+    };
+}
 impl Into<Program> for CompUnit {
     fn into(self) -> Program {
         let mut program = Program::new();
@@ -44,10 +89,7 @@ impl Into<Program> for CompUnit {
 
         // fill func
         let main_data = program.func_mut(main);
-        let bb = main_data
-            .dfg_mut()
-            .new_bb()
-            .basic_block(next_bb_id!("%main"));
+        let bb = main_data.dfg_mut().new_bb().basic_block(next_bb_id!("%main"));
         main_data.layout_mut().bbs_mut().push_key_back(bb).unwrap();
 
         let mut params = BuildParams {
@@ -100,11 +142,43 @@ impl BlockItem {
     }
 }
 
-
 impl Stmt {
     fn build(&self, program: &mut Program, params: &mut BuildParams) {
         match self {
-            Stmt::LVal(lval, exp) => {
+            Stmt::Open(stmt) => stmt.build(program, params),
+            Stmt::Closed(stmt) => stmt.build(program, params),
+        }
+    }
+}
+
+impl OpenStmt {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            OpenStmt::If(exp, stmt) => {
+                if_else!(program, params, exp, stmt, Option::<OpenStmt>::None);
+            }
+            OpenStmt::IfElse(exp, stmt1, stmt2) => {
+               if_else!(program, params, exp, stmt1, Some(stmt2));
+            }
+        }
+    }
+}
+
+impl ClosedStmt {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            ClosedStmt::Simple(stmt) => stmt.build(program, params),
+            ClosedStmt::IfElse(exp, stmt1, stmt2) => {
+                if_else!(program, params, exp, stmt1, Some(stmt2));
+            }
+        }
+    }
+}
+
+impl SimpleStmt {
+    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+        match self {
+            SimpleStmt::LVal(lval, exp) => {
                 exp.build(program, params);
                 let v = params.v.take().unwrap();
                 let func_data = program.func_mut(params.func);
@@ -112,16 +186,17 @@ impl Stmt {
                 match *lv {
                     vm::Decl::Var(lv) => {
                         let s = func_data.dfg_mut().new_value().store(v, lv);
+
                         func_data.layout_mut().bb_mut(params.bb).insts_mut().extend([s]);
                     }
                     _ => panic!()
                 }
             }
-            Stmt::Exp(exp) => {} // todo?
-            Stmt::Block(block) => {
+            SimpleStmt::Exp(_exp) => {} // todo?
+            SimpleStmt::Block(block) => {
                 block.build(program, params)
             }
-            Stmt::Ret(exp) => {
+            SimpleStmt::Ret(exp) => {
                 match exp {
                     Some(exp) => {
                         exp.build(program, params);
@@ -164,7 +239,7 @@ impl VarDecl {
 }
 
 impl ConstDef {
-    fn build(&self, program: &mut Program, params: &mut BuildParams) {
+    fn build(&self, _program: &mut Program, params: &mut BuildParams) {
         let v = self.value.calc(params);
         params.vm.insert_const(self.ident.as_str(), v);
     }
@@ -348,7 +423,7 @@ impl PrimaryExp {
                 let decl = params.vm.get(lval).unwrap();
                 match decl {
                     vm::Decl::Const(v) => *v,
-                    vm::Decl::Var(v) => panic!()
+                    vm::Decl::Var(_) => panic!()
                 }
             },
         }

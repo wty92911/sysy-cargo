@@ -64,10 +64,27 @@ pub enum BlockItem {
 
 #[derive(Debug)]
 pub enum Stmt {
+    Open(Box<OpenStmt>),
+    Closed(Box<ClosedStmt>),
+}
+
+#[derive(Debug)]
+pub enum SimpleStmt {
     LVal(LVal, Exp),
     Exp(Option<Exp>),
     Block(Block),
     Ret(Option<Exp>),
+}
+#[derive(Debug)]
+pub enum ClosedStmt {
+    Simple(Box<SimpleStmt>),
+    IfElse(Exp, Box<ClosedStmt>, Box<ClosedStmt>),
+}
+
+#[derive(Debug)]
+pub enum OpenStmt {
+    IfElse(Exp, ClosedStmt, Box<OpenStmt>),
+    If(Exp, Stmt),
 }
 
 #[derive(Debug)]

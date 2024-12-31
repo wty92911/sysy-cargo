@@ -1,8 +1,7 @@
 use koopa::ir::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::{Result, Write};
-use rand::{random, thread_rng};
-use rand::prelude::{IndexedRandom, IteratorRandom};
+use rand::prelude::IteratorRandom;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Mem {
